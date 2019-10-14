@@ -15,13 +15,21 @@
 // @updateURL   https://greasyfork.org/scripts/17879/code/PixivUserBatchDownload.user.js
 // @downloadURL https://greasyfork.org/scripts/17879/code/PixivUserBatchDownload.user.js
 // @include		*://www.pixiv.net/*
-// @exclude		*://www.pixiv.net/*mode=manga&illust_id*
-// @exclude		*://www.pixiv.net/*mode=big&illust_id*
-// @exclude		*://www.pixiv.net/*mode=manga_big*
-// @exclude		*://www.pixiv.net/*search.php*
+// @exclude		*://www.pixiv.net/search.php*
+// @exclude		*://www.pixiv.net/upload.php*
+// @exclude		*://www.pixiv.net/messages.php*
+// @exclude		*://www.pixiv.net/ranking.php*
+// @exclude		*://www.pixiv.net/setting*
+// @exclude		*://www.pixiv.net/stacc*
+// @exclude		*://www.pixiv.net/premium*
+// @exclude		*://www.pixiv.net/discovery*
+// @exclude		*://www.pixiv.net/howto*
+// @exclude		*://www.pixiv.net/idea*
+// @exclude		*://www.pixiv.net/novel*
+// @exclude		*://www.pixiv.net/cate_r18*
 // @resource    pubd-style  https://github.com/Mapaler/PixivUserBatchDownload/raw/master/PixivUserBatchDownload%20ui.css
 // @require     https://greasyfork.org/scripts/40003-pajhome-md5-min/code/PajHome-MD5-min.js?version=262502
-// @version		5.9.83
+// @version		5.9.85
 // @author      Mapaler <mapaler@163.com>
 // @copyright	2018+, Mapaler <mapaler@163.com>
 // @icon		http://www.pixiv.net/favicon.ico
@@ -940,7 +948,7 @@ function xhrGenneral(url, onload_suceess_Cb, onload_hasError_Cb, onload_notJson_
                 //jo.error.user_message 是单行文本的错误信息
                 if (jo.error) {
                     if (jo.error.message.indexOf("Error occurred at the OAuth process.") >= 0) {
-                        console.error("Token过期或错误",jo, response);
+                        console.warn("Token过期，或其他错误",jo, response);
                         reLogin(
                             function(){
                                 xhrGenneral(url, onload_suceess_Cb, onload_hasError_Cb, onload_notJson_Cb, onerror_Cb);
@@ -961,7 +969,7 @@ function xhrGenneral(url, onload_suceess_Cb, onload_hasError_Cb, onload_notJson_
             }
         },
         onerror: function(response) {
-            console.error("错误：AJAX发送失败", response);
+            console.error("错误：网络请求发送失败", response);
             onerror_Cb(response);
         }
     })
@@ -1002,7 +1010,20 @@ function getQueryString(name,url) {
     var reg = new RegExp("(^|&)" + name + "=([^&]*)(&|$)", "i");
     var search = url || window.location.search.substr(1);
 	var r = search.match(reg);
-	if (r != null) return decodeURIComponent(r[2]); return null;
+    if (r != null)
+        return decodeURIComponent(r[2]);
+    else
+        return null;
+}
+//从URL获取图片ID
+function getArtworkIdFromUrl(url) {
+    var regSrc = new RegExp(illustPattern, "ig");
+    var regRes = regSrc.exec(url);
+    if (regRes) {
+        var idRes = /^(\d+)/.exec(regRes[3]);
+        return parseInt(idRes[1]);
+    }else
+	    return null;
 }
 //获取当前用户ID
 function getCurrentUserId()
@@ -1010,8 +1031,14 @@ function getCurrentUserId()
     var userid = parseInt(getQueryString("id"));
     if(!userid)
     {
+        var userMainPageLink = document.querySelector("#root>div>div>div:nth-of-type(2)>nav>a");
+        var artWorkLink = document.querySelector("#root>div>div>div>main>section>div>div>figure>div a");
         var userHeadLink = document.querySelector("#root>div>div>div>aside>section a");
-        if (getQueryString("illust_id") && userHeadLink) //如果是作品页面
+        if (userMainPageLink) //如果是作者页面
+        {
+            userid = parseInt(getQueryString("id",userMainPageLink.search.substr(1)));
+        }
+        if (artWorkLink && userHeadLink) //如果是作品页面
         {
             userid = parseInt(getQueryString("id",userHeadLink.search.substr(1)));
         }else
@@ -1108,14 +1135,11 @@ function buildbtnMenu() {
     var menu = new pubdMenu("pubd-menu-main");
     menu.id = "pubd-menu";
     menu.downillust = menu.add("下载当前作品", "pubd-menu-this-illust", function(e) {
-        var illust_id = parseInt(getQueryString("illust_id"));
-        var arg;
-        if(illust_id)
-            arg = {id:illust_id};
+        var artWorkLink = document.querySelector("#root>div>div>div>main>section>div>div>figure>div a");
         pubd.dialog.downillust.show(
             (document.body.clientWidth - 500)/2,
             window.pageYOffset+150,
-            arg
+            {id:getArtworkIdFromUrl(artWorkLink.href)}
         );
         menu.hide();
     });
@@ -2564,7 +2588,6 @@ function buildDlgDownThis(userid) {
 function buildDlgDownIllust(illustid) {
     var dlg = new buildDlgDown("下载当前作品", "pubd-down pubd-downillust", "pubd-downillust");
     dlg.infoCard.infos = {"ID":illustid};
-
     dlg.work = null; //当前处理对象
 
     //分析
@@ -2579,7 +2602,7 @@ function buildDlgDownIllust(illustid) {
         {
             dlg.textdown.disabled = false;
             dlg.startdown.disabled = false;
-            console.log("当前作品JSON数据：",work);
+            console.log("当前作品JSON数据：",dlg.work);
             dlg.log("图片信息获取完毕");
             if (callbackAfterAnalyse) callbackAfterAnalyse();
         }else
@@ -2787,7 +2810,7 @@ function buildDlgDownIllust(illustid) {
             { //更换新的id
                 dlg.infoCard.thumbnail = "";
                 dlg.infoCard.infos = {"ID":arg.id}; //初始化窗口id
-                dlg.illust = null; //重置作品数据
+                dlg.work = null; //重置作品数据
             }
         }else if(!dlg.infoCard.infos["ID"]) //没有ID
         {
@@ -3293,16 +3316,18 @@ function findInsertPlace(btnStart) {
         return;
     }else
     {
-        if (getQueryString("illust_id"))
+        //第一张作品图像
+        var artWorkLink = document.querySelector("#root>div>div>div>main>section>div>div>figure>div a");
+        if (artWorkLink) //如果是作品页面，显示下载当前作品按钮
         {
             pubd.menu.downillust.classList.remove("display-none");
             downIllustMenuId = GM_registerMenuCommand("PUBD-下载该作品", function(){
-                var illust_id = parseInt(getQueryString("illust_id"));
-                var arg;
-                if(illust_id)
-                    arg = {id:illust_id};
-                pubd.dialog.downillust.show((document.body.clientWidth - 500)/2, window.pageYOffset+150, arg)}
-            );
+                pubd.dialog.downillust.show(
+                    (document.body.clientWidth - 500)/2,
+                    window.pageYOffset+150,
+                    {id:getArtworkIdFromUrl(artWorkLink.href)}
+                );
+            });
         }else
         {
             pubd.menu.downillust.classList.add("display-none");
@@ -3356,26 +3381,28 @@ function start(touch) {
     pubd.dialog.multiple = btnDlgInsertPlace.appendChild(buildDlgMultiple());
     
     //添加Tampermonkey扩展菜单内的入口
-    GM_registerMenuCommand("PUBD-选项", function(){pubd.dialog.config.show((document.body.clientWidth - 400)/2, window.pageYOffset+50);});
+    GM_registerMenuCommand("PUBD-选项", function(){
+        pubd.dialog.config.show(
+            (document.body.clientWidth - 400)/2,
+            window.pageYOffset+50
+        );
+    });
     GM_registerMenuCommand("PUBD-下载该画师", function(){
-        var arg;
-        var user_id = parseInt(getQueryString("id"));
-        if(user_id)
-        {
-            arg = {id:user_id};
-        }else if (getQueryString("illust_id")) //如果是作品页面
-        {
-            user_id = parseInt(getQueryString("id",document.querySelector("#root>div>div>div>aside>section a").search.substr(1)));
-            arg = {id:user_id}
-        }
-        pubd.dialog.downthis.show((document.body.clientWidth - 440)/2, window.pageYOffset+100, arg)}
-    );
+        pubd.dialog.downthis.show(
+            (document.body.clientWidth - 440)/2,
+            window.pageYOffset+100,
+            {id:getCurrentUserId()}
+        )
+    });
 
-    if (mdev) GM_registerMenuCommand("PUBD-导入窗口测试", function(){pubd.dialog.importdata.show(
+    if (mdev)
+    GM_registerMenuCommand("PUBD-导入窗口测试", function(){
+        pubd.dialog.importdata.show(
             (document.body.clientWidth - 370)/2,
             window.pageYOffset+200,
             {callback:function(txt){console.log(txt);}}
-        );});
+        );
+    });
 
 
     //开始操作按钮
