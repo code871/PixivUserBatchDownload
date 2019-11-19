@@ -29,7 +29,7 @@
 // @exclude		*://www.pixiv.net/cate_r18*
 // @resource    pubd-style  https://github.com/Mapaler/PixivUserBatchDownload/raw/master/PixivUserBatchDownload%20ui.css
 // @require     https://greasyfork.org/scripts/40003-pajhome-md5-min/code/PajHome-MD5-min.js?version=262502
-// @version		5.9.85
+// @version		5.9.88
 // @author      Mapaler <mapaler@163.com>
 // @copyright	2018+, Mapaler <mapaler@163.com>
 // @icon		http://www.pixiv.net/favicon.ico
@@ -62,14 +62,13 @@ if (
     self != top //iframe判断方式3
 ){return;}//iframe退出执行
 //获取当前是否是本地开发状态
-var mdev = Boolean(localStorage.getItem("pubd-dev"));
+const mdev = Boolean(localStorage.getItem("pubd-dev"));
 
 /*
  * 公共变量区
  */
 var pubd = { //储存设置
     configVersion: 1, //当前设置版本，用于提醒是否需要重置
-    cssVersion: 10, //当前需求CSS版本，用于提醒是否需要更新CSS
     touch: false, //是触屏
     loggedIn: false, //登陆了
     start: null, //开始按钮
@@ -92,7 +91,9 @@ var scriptName = "PixivUserBatchDownload"; //本程序的名称
 var scriptIcon = "http://www.pixiv.net/favicon.ico"; //本程序的图标
 if (typeof(GM_info)!="undefined")
 {
-	scriptVersion = GM_info.script.version.replace(/(^\s*)|(\s*$)/g, "");
+    if (mdev) console.log("GM_info信息：",GM_info); //用来显示meta数据
+    scriptVersion = GM_info.script.version.trim();
+    scriptIcon = GM_info.script.icon64 || GM_info.script.icon;
 	if (GM_info.script.name_i18n)
 	{
 		var i18n = (navigator.language||navigator.userLanguage).replace("-","_"); //获取浏览器语言
@@ -105,11 +106,15 @@ if (typeof(GM_info)!="undefined")
 	}
 }
 
-var illustPattern = '(https?://([^/]+)/.+/\\d{4}/\\d{2}/\\d{2}/\\d{2}/\\d{2}/\\d{2}/(\\d+(?:-([0-9a-zA-Z]+))?(?:_p|_ugoira)))\\d+(?:_\\w+)?\\.([\\w\\d]+)'; //P站图片地址正则匹配式
-var limitingPattern = '(https?://([^/]+)/common/images/(limit_(mypixiv|unknown)))_\\d+\\.([\\w\\d]+)'; //P站上锁图片完整地址正则匹配式
-var limitingFilenamePattern = 'limit_(mypixiv|unknown)'; //P站上锁图片文件名正则匹配式
+const illustPattern = '(https?://([^/]+)/.+/\\d{4}/\\d{2}/\\d{2}/\\d{2}/\\d{2}/\\d{2}/(\\d+(?:-([0-9a-zA-Z]+))?(?:_p|_ugoira)))\\d+(?:_\\w+)?\\.([\\w\\d]+)'; //P站图片地址正则匹配式
+const limitingPattern = '(https?://([^/]+)/common/images/(limit_(mypixiv|unknown)))_\\d+\\.([\\w\\d]+)'; //P站上锁图片完整地址正则匹配式
+const limitingFilenamePattern = 'limit_(mypixiv|unknown)'; //P站上锁图片文件名正则匹配式
 
-var UA = "PixivAndroidApp/5.0.155 (Android 9.0.0; Android SDK built for x86)"; //向P站请求数据时的UA
+const PixivAppVersion = "5.0.161"; //Pixiv APP的版本
+const AndroidVersion = "9.0.0"; //安卓的版本
+const UA = "PixivAndroidApp/" + PixivAppVersion + " (Android " + AndroidVersion + "; Android SDK built for x86)"; //向P站请求数据时的UA
+const X_Client_Hash_Salt = "28c1fdd170a5204386cb1313c7077b34f83e4aaf4aa829ce78c231e05b0bae2c";
+
 var thisPageUserid = 0; //当前页面的画师ID
 var thisPageIllustid = 0; //当前页面的画师ID
 var findInsertPlaceHook; //储存循环钩子
@@ -122,13 +127,13 @@ var downIllustMenuId = null; //下载当前作品的菜单的ID
 //1、获取原网页数据对象
 if (typeof(unsafeWindow) != "undefined")
 {
-    var pixiv = unsafeWindow.pixiv; //原来的信息
-    var globalInitData = unsafeWindow.globalInitData; //新版的插画页面信息
+    const globalInitData = unsafeWindow.globalInitData; //新版的插画页面信息
+    const pixiv = unsafeWindow.pixiv; //原来的信息
 }
 //2、获取是否为登录状态与当前页面画师ID
 if (typeof(pixiv) == "undefined" && typeof(globalInitData) == "undefined")
 {
-        console.error("PUBD：当前网页没有找到 pixiv 对象或 globalInitData 对象");
+    console.error("PUBD：当前网页没有找到 pixiv 对象或 globalInitData 对象");
 }
 else
 {
@@ -211,53 +216,33 @@ if (typeof(GM_notification) == "undefined") {
     }
 }
 
-//生成P站需要的时间格式，如 "2019-09-03T18:51:40+08:00"
-Date.prototype.toPixivString = function() {
-    var p = PrefixInteger; //补前导0函数的简写
-    var offsetPlus = this.getTimezoneOffset()<=0; //时区的正负号
-    var offsetAbs = Math.abs(this.getTimezoneOffset()); //时区的差值绝对值
-    var str = this.getFullYear() + "-" + p(this.getMonth()+1,2) + "-" + p(this.getDate(),2)
-        + "T" + p(this.getHours()) + ":" + p(this.getMinutes()) + ":" + p(this.getSeconds())
-        + (offsetPlus?"+":"-") + p(Math.round(offsetAbs/60),2) + ":" + p(Math.round(offsetAbs%60),2);
-    return str;
-}
 /*
- * 现成函数库，好像根本没用上
+ * 现成函数库
  */
 //填充截取法补前导0
-function PrefixInteger(num, length) {
-    //这里用slice和substr均可
-    return (Array(length).join('0') + num).slice(-length);
-}
-//String.format实现占位符输出
-String.prototype.format = function() {
-    if (arguments.length == 0) return this;
-    for (var s = this, i = 0; i < arguments.length; i++)
-        s = s.replace(new RegExp("\\{" + i + "\\}", "g"), arguments[i]);
-    return s;
-};
-/*
-** randomWord 产生任意长度随机字母数字组合
-** randomFlag-是否任意长度 min-任意长度最小位[固定位数] max-任意长度最大位
-** xuanfeng 2014-08-28
-*/
-function randomWord(min, max, randomFlag){
-    var strArr = [],
-    range = min,
-    arr = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'];
-    // 随机产生
-    if(randomFlag){
-        range = Math.round(Math.random() * (max-min)) + min;
+function PrefixInteger(num, length=2) {
+    let ns = num.toString();
+    if (ns.length >= length)
+        return ns;
+    else
+    { //这里用slice和substr均可
+        return (Array(length).join('0') + num.toString()).slice(-length);
     }
-    for(var i=0; i<range; i++){
-        pos = Math.round(Math.random() * (arr.length-1));
-        strArr.push(arr[pos]);
-    }
-    return strArr.join("");
 }
 /*
  * 自定义对象区
  */
+
+//生成P站需要的时间格式，如 "2019-09-03T18:51:40+08:00"
+Date.prototype.toPixivString = function() {
+    let p = PrefixInteger; //补前导0函数的简写
+    let offsetSign = this.getTimezoneOffset()<=0?"+":"-"; //时区的正负号
+    let offsetAbs = Math.abs(this.getTimezoneOffset()); //时区的差值绝对值
+    let str = this.getFullYear() + "-" + p(this.getMonth()+1) + "-" + p(this.getDate())
+        + "T" + p(this.getHours()) + ":" + p(this.getMinutes()) + ":" + p(this.getSeconds())
+        + offsetSign + p(Math.round(offsetAbs/60)) + ":" + p(Math.round(offsetAbs%60));
+    return str;
+}
 
 //一个Post数据
 var PostDataObject = function(obj){
@@ -267,13 +252,13 @@ PostDataObject.prototype.increase = function(obj) {
     this.data = Object.assign(this.data, obj); //合并obj
 }
 PostDataObject.prototype.toPostString = function() {
-    var arr = new Array;
+    let arr = new Array;
     for (var na in this.data) {
-        var item = [na, this.data[na]];
+        let item = [na, this.data[na]];
         arr.push(item);
     }
 
-    var str = arr.map(
+    let str = arr.map(
         function(item) {
             return item.join("=");
         }
@@ -317,14 +302,15 @@ UsersStarList.prototype.toggle = function(userid) {
 
 //一个本程序使用的headers数据
 var HeadersObject = function(obj) {
+    let time = new Date().toPixivString();
     this["App-OS"] = "android";
-    this["App-OS-Version"] = "9.0.0";
-    this["App-Version"] = "5.0.155";
+    this["App-OS-Version"] = AndroidVersion;
+    this["App-Version"] = PixivAppVersion;
     this["User-Agent"] = UA;
     this["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"; //重要
     this["Referer"] = "https://app-api.pixiv.net/";
-    this["X-Client-Hash"] = hex_md5(new Date().toPixivString() + "28c1fdd170a5204386cb1313c7077b34f83e4aaf4aa829ce78c231e05b0bae2c");
-    this["X-Client-Time"] = new Date().toPixivString();
+    this["X-Client-Hash"] = hex_md5(time + X_Client_Hash_Salt);
+    this["X-Client-Time"] = time;
 
     if (typeof(obj) == "object")
     {
@@ -406,25 +392,34 @@ Auth.prototype.login = function(onload_suceess_Cb, onload_hasError_Cb, onload_no
         headers: new HeadersObject(),
         data: postObj.toPostString(),
         onload: function(response) {
+            var jo;
             try {
                 var jo = JSON.parse(response.responseText);
+            } catch (e) {
+                console.error("登录失败，返回可能不是JSON格式，或本程序异常。", e, response);
+                onload_notJson_Cb(response);
+                return;
+            }
+
+            if (jo)
+            {
                 if (jo.has_error || jo.errors) {
                     console.error("登录失败，返回错误消息", jo);
                     onload_hasError_Cb(jo);
+                    return;
                 } else { //登陆成功
                     _thisAuth.response = jo.response;
                     _thisAuth.login_date = new Date().getTime();
                     console.info("登陆成功", jo);
                     onload_suceess_Cb(jo);
+                    return;
                 }
-            } catch (e) {
-                console.error("登录失败，返回可能不是JSON，或程序异常", e, response);
-                onload_notJson_Cb(response);
             }
         },
         onerror: function(response) {
             console.error("登录失败，AJAX发送失败", response);
             onerror_Cb(response);
+            return;
         }
     })
 }
@@ -436,6 +431,7 @@ var Mask = function(name, logic, content){
 }
 //一个下载方案
 var DownScheme = function(name) {
+    //默认值
     this.name = name ? name : "默认方案";
     this.rpcurl = "http://localhost:6800/jsonrpc";
     this.https2http = false;
@@ -792,7 +788,7 @@ function InfoCard(datas) {
         },
         set(obj) {
             infoObj = obj;
-            for (var ci=infosDlDom.children.length-1;ci>=0;ci--)
+            for (var ci = infosDlDom.children.length-1;ci >= 0;ci--)
             { //删掉所有老子元素
                 var x = infosDlDom.children[ci];
                 x.remove();
@@ -942,8 +938,17 @@ function xhrGenneral(url, onload_suceess_Cb, onload_hasError_Cb, onload_notJson_
         responseType: "text",
         headers: headersObj,
         onload: function(response) {
+            var jo;
             try {
-                var jo = JSON.parse(response.responseText);
+                jo = JSON.parse(response.responseText);
+            } catch (e) {
+                console.error("错误：返回可能不是JSON格式，或本程序异常", e, response);
+                onload_notJson_Cb(response);
+                return;
+            }
+
+            if (jo)
+            {
                 //jo.error.message 是JSON字符串的错误信息，Token错误的时候返回的又是普通字符串
                 //jo.error.user_message 是单行文本的错误信息
                 if (jo.error) {
@@ -955,17 +960,17 @@ function xhrGenneral(url, onload_suceess_Cb, onload_hasError_Cb, onload_notJson_
                             },
                             onload_hasError_Cb
                         );
+                        return;
                     }else
                     {
                         onload_hasError_Cb(jo);
+                        return;
                     }
                 } else { //登陆成功
                     //console.info("JSON返回成功",jo);
                     onload_suceess_Cb(jo);
+                    return;
                 }
-            } catch (e) {
-                console.error("错误：返回可能不是JSON，或程序异常", e, response);
-                onload_notJson_Cb(response);
             }
         },
         onerror: function(response) {
@@ -1093,7 +1098,7 @@ function buildbtnStart() {
     //添加图标
     var star = btnStart.star = btnStart.appendChild(document.createElement("i"));
     star.className = "pubd-icon star";
-    star.title = "快速收藏当前画师";
+    star.title = "快速收藏当前画师（开发中功能，目前没用）";
     //添加文字
     var caption = btnStart.caption = btnStart.appendChild(document.createElement("div"));
     caption.className = "text";
@@ -1844,7 +1849,7 @@ function reLogin(onload_suceess_Cb,onerror_Cb)
                 onerror_Cb(defaultError);
             },
             function(jore) { //onload_notjson_Cb //返回不是JSON
-                dlgLogin.error.replace("返回不是JSON，或程序异常");
+                dlgLogin.error.replace("返回不是JSON，或本程序异常");
                 onerror_Cb(defaultError);
             },
             function(jore) { //onerror_Cb //AJAX发送失败
@@ -1936,7 +1941,7 @@ function buildDlgLogin() {
                     dlg.error.replace(["错误代码：" + jore.errors.system.code, jore.errors.system.message]);
                 },
                 function(re) { //onload_notjson_Cb //返回不是JSON
-                    dlg.error.replace("返回不是JSON，或程序异常");
+                    dlg.error.replace("返回不是JSON，或本程序异常");
                 },
                 function(re) { //onerror_Cb //AJAX发送失败
                     dlg.error.replace("AJAX发送失败");
@@ -2216,7 +2221,7 @@ function buildDlgDownThis(userid) {
                         return;
                     },
                     function(re) { //onload_notjson_Cb //返回不是JSON
-                        dlg.log("错误：返回不是JSON，或程序异常");
+                        dlg.log("错误：返回不是JSON，或本程序异常");
                         works.runing = false;
                         dlg.textdown.disabled = false; //错误暂停时，可以操作目前的进度。
                         dlg.startdown.disabled = false;
@@ -2374,7 +2379,7 @@ function buildDlgDownThis(userid) {
                         return;
                     },
                     function(re) { //onload_notjson_Cb //返回不是JSON
-                        dlg.log("错误：返回不是JSON，或程序异常");
+                        dlg.log("错误：返回不是JSON，或本程序异常");
                         works.runing = false;
                         dlg.textdown.disabled = false; //错误暂停时，可以操作目前的进度。
                         dlg.startdown.disabled = false;
@@ -2440,7 +2445,7 @@ function buildDlgDownThis(userid) {
                         return;
                     },
                     function(re) { //onload_notjson_Cb //返回不是JSON
-                        dlg.log("错误：返回不是JSON，或程序异常");
+                        dlg.log("错误：返回不是JSON，或本程序异常");
                         works.runing = false;
                         dlg.textdown.disabled = false; //错误暂停时，可以操作目前的进度。
                         dlg.startdown.disabled = false;
@@ -2693,7 +2698,7 @@ function buildDlgDownIllust(illustid) {
                     return;
                 },
                 function(re) { //onload_notjson_Cb //返回不是JSON
-                    dlg.log("错误：返回不是JSON，或程序异常");
+                    dlg.log("错误：返回不是JSON，或本程序异常");
                     dlg.textdown.disabled = false; //错误暂停时，可以操作目前的进度。
                     dlg.startdown.disabled = false;
                 },
@@ -2734,7 +2739,7 @@ function buildDlgDownIllust(illustid) {
                     return;
                 },
                 function(re) { //onload_notjson_Cb //返回不是JSON
-                    dlg.log("错误：返回不是JSON，或程序异常");
+                    dlg.log("错误：返回不是JSON，或本程序异常");
                     works.runing = false;
                     dlg.textdown.disabled = false; //错误暂停时，可以操作目前的进度。
                     dlg.startdown.disabled = false;
